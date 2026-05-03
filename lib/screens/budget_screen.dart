@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../models/budget.dart';
 import '../providers/shopping_list_provider.dart';
+import '../providers/budget_provider.dart';
 
 /// Budget tracking screen with real-time shopping list integration
 ///
@@ -22,52 +23,16 @@ class BudgetScreen extends ConsumerStatefulWidget {
 
 class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   // State variables
-  bool _isLoading = false;
   double _monthlyBudget = 500.0; // Default budget
-  double _currentSpending = 0.0;
-  Map<String, double> _weeklySpendingByCategory = {};
-  List<Budget> _recentExpenses = [];
 
   @override
   void initState() {
     super.initState();
-    _loadBudgetData();
-  }
-
-  /// Loads budget data
-  Future<void> _loadBudgetData() async {
-    setState(() => _isLoading = true);
-
-    try {
-
-      // Initialize with existing expenses
-      _currentSpending = _recentExpenses.fold(0.0, (sum, expense) => sum + expense.amount);
-      
-      // Calculate category spending from expenses
-      _weeklySpendingByCategory = {};
-      for (var expense in _recentExpenses) {
-        _weeklySpendingByCategory[expense.category] =
-            (_weeklySpendingByCategory[expense.category] ?? 0) + expense.amount;
-      }
-
-      setState(() {
-        _isLoading = false;
-      });
-
-      // Check budget alert is done in build method with actual data
-    } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading budget data: $e')),
-        );
-      }
-    }
   }
 
   /// Checks if user has reached 80% of budget and shows alert
-  void _checkBudgetAlert(double estimatedShoppingListCost) {
-    final projectedTotal = _currentSpending + estimatedShoppingListCost;
+  void _checkBudgetAlert(double estimatedShoppingListCost, double currentSpending) {
+    final projectedTotal = currentSpending + estimatedShoppingListCost;
     final budgetPercentage = (projectedTotal / _monthlyBudget) * 100;
 
     if (budgetPercentage >= 80 && budgetPercentage < 100) {
@@ -160,6 +125,12 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
       (sum, item) => sum + (item.estimatedPrice ?? 0),
     );
 
+    // Get budget data from provider
+    final expenses = ref.watch(budgetProvider);
+    final budgetNotifier = ref.read(budgetProvider.notifier);
+    final currentSpending = budgetNotifier.totalSpending;
+    final weeklySpendingByCategory = budgetNotifier.weeklySpendingByCategory;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Budget Tracker'),
@@ -171,34 +142,32 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadBudgetData,
+            onPressed: () => budgetNotifier.refresh(),
             tooltip: 'Refresh',
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadBudgetData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildBudgetSummaryCard(estimatedShoppingListCost),
-                    const SizedBox(height: 16),
-                    _buildShoppingListEstimateCard(shoppingItems, estimatedShoppingListCost),
-                    const SizedBox(height: 16),
-                    _buildWeeklySpendingChart(),
-                    const SizedBox(height: 16),
-                    _buildCategoryBreakdown(),
-                    const SizedBox(height: 16),
-                    _buildRecentExpenses(),
-                  ],
-                ),
-              ),
-            ),
+      body: RefreshIndicator(
+        onRefresh: () => budgetNotifier.refresh(),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildBudgetSummaryCard(estimatedShoppingListCost, currentSpending),
+              const SizedBox(height: 16),
+              _buildShoppingListEstimateCard(shoppingItems, estimatedShoppingListCost),
+              const SizedBox(height: 16),
+              _buildWeeklySpendingChart(weeklySpendingByCategory),
+              const SizedBox(height: 16),
+              _buildCategoryBreakdown(weeklySpendingByCategory),
+              const SizedBox(height: 16),
+              _buildRecentExpenses(expenses),
+            ],
+          ),
+        ),
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _addExpense,
         child: const Icon(Icons.add),
@@ -208,8 +177,8 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   }
 
   /// Budget summary card with progress indicator
-  Widget _buildBudgetSummaryCard(double estimatedShoppingListCost) {
-    final projectedTotal = _currentSpending + estimatedShoppingListCost;
+  Widget _buildBudgetSummaryCard(double estimatedShoppingListCost, double currentSpending) {
+    final projectedTotal = currentSpending + estimatedShoppingListCost;
     final budgetPercentage = (projectedTotal / _monthlyBudget).clamp(0.0, 1.0);
     final remaining = _monthlyBudget - projectedTotal;
 
@@ -255,7 +224,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
               children: [
                 _buildBudgetStat(
                   'Spent',
-                  '\$${_currentSpending.toStringAsFixed(2)}',
+                  '\$${currentSpending.toStringAsFixed(2)}',
                   Colors.blue,
                 ),
                 _buildBudgetStat(
@@ -395,8 +364,8 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   }
 
   /// Weekly spending bar chart by category
-  Widget _buildWeeklySpendingChart() {
-    if (_weeklySpendingByCategory.isEmpty) {
+  Widget _buildWeeklySpendingChart(Map<String, double> weeklySpendingByCategory) {
+    if (weeklySpendingByCategory.isEmpty) {
       return Card(
         elevation: 4,
         child: Padding(
@@ -442,11 +411,11 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
               child: BarChart(
                 BarChartData(
                   alignment: BarChartAlignment.spaceAround,
-                  maxY: _weeklySpendingByCategory.values.reduce((a, b) => a > b ? a : b) * 1.2,
+                  maxY: weeklySpendingByCategory.values.reduce((a, b) => a > b ? a : b) * 1.2,
                   barTouchData: BarTouchData(
                     touchTooltipData: BarTouchTooltipData(
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                        final category = _weeklySpendingByCategory.keys.elementAt(groupIndex);
+                        final category = weeklySpendingByCategory.keys.elementAt(groupIndex);
                         return BarTooltipItem(
                           '$category\n\$${rod.toY.toStringAsFixed(2)}',
                           const TextStyle(color: Colors.white),
@@ -460,7 +429,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
-                          final categories = _weeklySpendingByCategory.keys.toList();
+                          final categories = weeklySpendingByCategory.keys.toList();
                           if (value.toInt() >= 0 && value.toInt() < categories.length) {
                             return Padding(
                               padding: const EdgeInsets.only(top: 8),
@@ -494,8 +463,8 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                     ),
                   ),
                   borderData: FlBorderData(show: false),
-                  barGroups: _weeklySpendingByCategory.entries.map((entry) {
-                    final index = _weeklySpendingByCategory.keys.toList().indexOf(entry.key);
+                  barGroups: weeklySpendingByCategory.entries.map((entry) {
+                    final index = weeklySpendingByCategory.keys.toList().indexOf(entry.key);
                     return BarChartGroupData(
                       x: index,
                       barRods: [
@@ -529,8 +498,8 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   }
 
   /// Category breakdown pie chart
-  Widget _buildCategoryBreakdown() {
-    if (_weeklySpendingByCategory.isEmpty) {
+  Widget _buildCategoryBreakdown(Map<String, double> weeklySpendingByCategory) {
+    if (weeklySpendingByCategory.isEmpty) {
       return Card(
         elevation: 4,
         child: Padding(
@@ -559,7 +528,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
       );
     }
 
-    final total = _weeklySpendingByCategory.values.reduce((a, b) => a + b);
+    final total = weeklySpendingByCategory.values.reduce((a, b) => a + b);
 
     return Card(
       elevation: 4,
@@ -573,7 +542,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            ..._weeklySpendingByCategory.entries.map((entry) {
+            ...weeklySpendingByCategory.entries.map((entry) {
               final percentage = (entry.value / total * 100);
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -611,7 +580,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   }
 
   /// Recent expenses list
-  Widget _buildRecentExpenses() {
+  Widget _buildRecentExpenses(List<Budget> expenses) {
     return Card(
       elevation: 4,
       child: Padding(
@@ -624,7 +593,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            if (_recentExpenses.isEmpty)
+            if (expenses.isEmpty)
               const Center(
                 child: Padding(
                   padding: EdgeInsets.all(16),
@@ -632,7 +601,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                 ),
               )
             else
-              ..._recentExpenses.map((expense) => ListTile(
+              ...expenses.map((expense) => ListTile(
                 leading: CircleAvatar(
                   backgroundColor: _getCategoryColor(expense.category),
                   child: const Icon(Icons.shopping_bag, color: Colors.white),
@@ -816,15 +785,8 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                             type: BudgetType.expense,
                           );
 
-                          // Add to recent expenses and update spending
-                          this.setState(() {
-                            _recentExpenses.insert(0, expense);
-                            _currentSpending += amount;
-                            
-                            // Update category spending
-                            _weeklySpendingByCategory[selectedCategory] =
-                                (_weeklySpendingByCategory[selectedCategory] ?? 0) + amount;
-                          });
+                          // Add expense using provider (updates state immediately and saves to Firestore)
+                          ref.read(budgetProvider.notifier).addExpense(expense);
 
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -840,7 +802,8 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen> {
                             0,
                             (sum, item) => sum + (item.estimatedPrice ?? 0),
                           );
-                          _checkBudgetAlert(estimatedCost);
+                          final updatedSpending = ref.read(budgetProvider.notifier).totalSpending;
+                          _checkBudgetAlert(estimatedCost, updatedSpending);
                         },
                         child: const Text('Add Expense'),
                       ),
