@@ -1,0 +1,26 @@
+/// Watson Visual Recognition API Configuration Template
+/// 
+/// Copy this file to watson_config.dart and fill in your actual credentials.
+/// DO NOT commit watson_config.dart to version control!
+/// 
+/// Get your credentials from: https://cloud.ibm.com/
+class WatsonConfig {
+  /// Your IBM Watson API Key
+  /// Example: 'abcdef123456789'
+  static const String apiKey = 'YOUR_WATSON_API_KEY';
+  
+  /// Your IBM Watson API URL
+  /// Example: 'https://api.us-south.watson.cloud.ibm.com/instances/YOUR_INSTANCE_ID'
+  static const String apiUrl = 'YOUR_WATSON_API_URL';
+  
+  /// Your IBM Watson Visual Recognition URL
+  /// Example: 'https://api.us-south.visual-recognition.watson.cloud.ibm.com/instances/YOUR_INSTANCE_ID/v4/analyze'
+  static const String visualRecognitionUrl = 'YOUR_WATSON_VISUAL_RECOGNITION_URL';
+  
+  /// Minimum confidence threshold for item detection (0.0 to 1.0)
+  /// Default: 0.5 (50% confidence)
+  static const double confidenceThreshold = 0.5;
+  
+  /// Enable Watson service (set to false to use OCR only)
+  static const bool enableWatson = true;
+}

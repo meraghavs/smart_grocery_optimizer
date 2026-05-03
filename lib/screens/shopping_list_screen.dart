@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_grocery_optimizer/models/shopping_list.dart';
 import 'package:smart_grocery_optimizer/providers/shopping_list_provider.dart';
+import 'package:smart_grocery_optimizer/screens/scanner_screen.dart';
 
 /// Shopping list management screen
 /// 
@@ -11,15 +12,20 @@ import 'package:smart_grocery_optimizer/providers/shopping_list_provider.dart';
 /// - Check off items
 /// - Price estimation
 /// - Share lists
+/// - Camera scanning for quick item addition
 
-class ShoppingListScreen extends ConsumerWidget {
+class ShoppingListScreen extends ConsumerStatefulWidget {
   const ShoppingListScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ShoppingListScreen> createState() => _ShoppingListScreenState();
+}
+
+class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
+  @override
+  Widget build(BuildContext context) {
     final shoppingItems = ref.watch(shoppingListProvider);
     final purchasedItems = shoppingItems.where((item) => item.isPurchased).toList();
-    final pendingItems = shoppingItems.where((item) => !item.isPurchased).toList();
     final totalEstimated = shoppingItems.fold<double>(
       0,
       (sum, item) => sum + (item.estimatedPrice ?? 0),
@@ -29,6 +35,11 @@ class ShoppingListScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Shopping List'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.camera_alt),
+            tooltip: 'Scan items',
+            onPressed: _openScanner,
+          ),
           if (purchasedItems.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.delete_sweep),
@@ -55,7 +66,7 @@ class ShoppingListScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Tap + to add items',
+                    'Tap + to add items or camera to scan',
                     style: TextStyle(color: Colors.grey[600]),
                   ),
                 ],
@@ -119,14 +130,23 @@ class ShoppingListScreen extends ConsumerWidget {
                                   : null,
                             ),
                           ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              ref.read(shoppingListProvider.notifier).removeItem(item.id);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('${item.name} removed')),
-                              );
-                            },
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () => _showEditItemDialog(item),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () {
+                                  ref.read(shoppingListProvider.notifier).removeItem(item.id);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('${item.name} removed')),
+                                  );
+                                },
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -136,13 +156,229 @@ class ShoppingListScreen extends ConsumerWidget {
               ],
             ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddItemDialog(context, ref),
+        onPressed: _showAddItemDialog,
         child: const Icon(Icons.add),
       ),
     );
   }
 
-  void _showAddItemDialog(BuildContext context, WidgetRef ref) {
+  /// Open scanner screen to scan items with camera
+  Future<void> _openScanner() async {
+    try {
+      final scannedItems = await Navigator.push<List<String>>(
+        context,
+        MaterialPageRoute(
+          builder: (context) => const ScannerScreen(),
+        ),
+      );
+
+      if (scannedItems != null && scannedItems.isNotEmpty && mounted) {
+        _showAddScannedItemsDialog(scannedItems);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open scanner: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Show dialog to add scanned items to shopping list
+  void _showAddScannedItemsDialog(List<String> scannedItems) {
+    String selectedUnit = 'pcs';
+    String selectedCategory = 'Other';
+    final quantityController = TextEditingController(text: '1');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.camera_alt, color: Colors.green),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Add Scanned Items',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${scannedItems.length} item(s) detected',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Set default quantity and category for all items:',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: quantityController,
+                        decoration: const InputDecoration(
+                          labelText: 'Quantity',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedUnit,
+                        decoration: const InputDecoration(
+                          labelText: 'Unit',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: ['pcs', 'kg', 'g', 'L', 'ml', 'lb', 'oz']
+                            .map((unit) => DropdownMenuItem(
+                                  value: unit,
+                                  child: Text(unit),
+                                ))
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => selectedUnit = value);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: selectedCategory,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.category),
+                  ),
+                  items: [
+                    'Dairy',
+                    'Meat',
+                    'Vegetables',
+                    'Fruits',
+                    'Bakery',
+                    'Beverages',
+                    'Snacks',
+                    'Other'
+                  ]
+                      .map((category) => DropdownMenuItem(
+                            value: category,
+                            child: Text(category),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => selectedCategory = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 8),
+                const Text(
+                  'Items to add:',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: scannedItems.length,
+                    itemBuilder: (context, index) => Card(
+                      margin: const EdgeInsets.only(bottom: 4),
+                      child: ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.shopping_basket, size: 20),
+                        title: Text(
+                          scannedItems[index],
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          final quantity =
+                              double.tryParse(quantityController.text) ?? 1;
+
+                          for (final itemName in scannedItems) {
+                            final item = ShoppingListItem(
+                              id: '${DateTime.now().millisecondsSinceEpoch}_${scannedItems.indexOf(itemName)}',
+                              userId: 'user1',
+                              name: itemName,
+                              category: selectedCategory,
+                              quantity: quantity,
+                              unit: selectedUnit,
+                              estimatedPrice: null,
+                              isPurchased: false,
+                              addedDate: DateTime.now(),
+                              notes: 'Added via camera scan',
+                            );
+
+                            ref.read(shoppingListProvider.notifier).addItem(item);
+                          }
+
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                '${scannedItems.length} item(s) added to shopping list',
+                              ),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        },
+                        child: const Text('Add All'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAddItemDialog() {
     final nameController = TextEditingController();
     final quantityController = TextEditingController();
     final priceController = TextEditingController();
@@ -291,7 +527,7 @@ class ShoppingListScreen extends ConsumerWidget {
 
                           final item = ShoppingListItem(
                             id: DateTime.now().millisecondsSinceEpoch.toString(),
-                            userId: 'user1', // TODO: Get from auth
+                            userId: 'user1',
                             name: nameController.text,
                             category: selectedCategory,
                             quantity: double.tryParse(quantityController.text) ?? 1,
@@ -313,6 +549,192 @@ class ShoppingListScreen extends ConsumerWidget {
                           );
                         },
                         child: const Text('Add Item'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showEditItemDialog(ShoppingListItem item) {
+    final nameController = TextEditingController(text: item.name);
+    final quantityController = TextEditingController(text: item.quantity.toString());
+    final priceController = TextEditingController(
+      text: item.estimatedPrice?.toString() ?? '',
+    );
+    final notesController = TextEditingController(text: item.notes ?? '');
+    String selectedUnit = item.unit;
+    String selectedCategory = item.category;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Edit Shopping Item',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Item Name',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.shopping_bag),
+                  ),
+                  textCapitalization: TextCapitalization.words,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: quantityController,
+                        decoration: const InputDecoration(
+                          labelText: 'Quantity',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedUnit,
+                        decoration: const InputDecoration(
+                          labelText: 'Unit',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: ['pcs', 'kg', 'g', 'L', 'ml', 'lb', 'oz']
+                            .map((unit) => DropdownMenuItem(
+                                  value: unit,
+                                  child: Text(unit),
+                                ))
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => selectedUnit = value);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: selectedCategory,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.category),
+                  ),
+                  items: [
+                    'Dairy',
+                    'Meat',
+                    'Vegetables',
+                    'Fruits',
+                    'Bakery',
+                    'Beverages',
+                    'Snacks',
+                    'Other'
+                  ]
+                      .map((category) => DropdownMenuItem(
+                            value: category,
+                            child: Text(category),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => selectedCategory = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: priceController,
+                  decoration: const InputDecoration(
+                    labelText: 'Estimated Price (optional)',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.attach_money),
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: notesController,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes (optional)',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.note),
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (nameController.text.isEmpty ||
+                              quantityController.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please fill in all required fields'),
+                              ),
+                            );
+                            return;
+                          }
+
+                          final updatedItem = ShoppingListItem(
+                            id: item.id,
+                            userId: item.userId,
+                            name: nameController.text,
+                            category: selectedCategory,
+                            quantity: double.tryParse(quantityController.text) ?? 1,
+                            unit: selectedUnit,
+                            estimatedPrice: priceController.text.isNotEmpty
+                                ? double.tryParse(priceController.text)
+                                : null,
+                            isPurchased: item.isPurchased,
+                            addedDate: item.addedDate,
+                            notes: notesController.text.isNotEmpty
+                                ? notesController.text
+                                : null,
+                          );
+
+                          ref.read(shoppingListProvider.notifier).updateItem(updatedItem);
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('${updatedItem.name} updated')),
+                          );
+                        },
+                        child: const Text('Save Changes'),
                       ),
                     ),
                   ],

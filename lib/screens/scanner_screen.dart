@@ -1,10 +1,14 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../services/watson_service.dart';
 
-/// Camera screen that captures grocery items and runs OCR
-/// to extract item names, then returns them to the calling screen
+/// Camera screen that captures grocery items and uses both:
+/// 1. Watson Visual Recognition for AI-powered image recognition
+/// 2. OCR text recognition as fallback
+/// Returns identified items to the calling screen
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
 
@@ -17,17 +21,24 @@ class _ScannerScreenState extends State<ScannerScreen>
   // Camera and ML Kit resources
   CameraController? _cameraController;
   final TextRecognizer _textRecognizer = TextRecognizer();
+  
+  // Watson service for AI image recognition
+  WatsonService? _watsonService;
 
   // State flags
   bool _isCameraInitialized = false;
   bool _isProcessing = false;
   String? _errorMessage;
   FlashMode _flashMode = FlashMode.off;
+  
+  // Recognition mode: 'ai' for Watson Visual Recognition, 'ocr' for text recognition
+  String _recognitionMode = 'ai';
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initializeWatsonService();
     _initializeCamera();
   }
 
@@ -36,7 +47,23 @@ class _ScannerScreenState extends State<ScannerScreen>
     WidgetsBinding.instance.removeObserver(this);
     _cameraController?.dispose();
     _textRecognizer.close();
+    _watsonService?.dispose();
     super.dispose();
+  }
+  
+  /// Initialize Watson service for AI image recognition
+  void _initializeWatsonService() {
+    try {
+      // TODO: Replace with actual Watson API credentials from environment variables or config
+      _watsonService = WatsonService(
+        apiKey: 'YOUR_WATSON_API_KEY',
+        apiUrl: 'YOUR_WATSON_API_URL',
+        visualRecognitionUrl: 'YOUR_WATSON_VISUAL_RECOGNITION_URL',
+      );
+    } catch (e) {
+      debugPrint('Failed to initialize Watson service: $e');
+      // Continue without Watson - will fall back to OCR only
+    }
   }
 
   @override
@@ -98,7 +125,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
-  /// Capture image and process with OCR
+  /// Capture image and process with AI or OCR based on selected mode
   Future<void> _captureAndProcess() async {
     if (_cameraController == null ||
         !_cameraController!.value.isInitialized ||
@@ -112,26 +139,59 @@ class _ScannerScreenState extends State<ScannerScreen>
       // Capture image
       final XFile image = await _cameraController!.takePicture();
 
-      // Convert to InputImage for ML Kit
-      final inputImage = InputImage.fromFilePath(image.path);
+      List<Map<String, dynamic>> identifiedItems = [];
 
-      // Process with OCR
-      final RecognizedText recognizedText =
-          await _textRecognizer.processImage(inputImage);
+      // Try AI recognition first if Watson is available and mode is 'ai'
+      if (_recognitionMode == 'ai' && _watsonService != null) {
+        try {
+          // Read image bytes for Watson API
+          final imageBytes = await File(image.path).readAsBytes();
+          
+          // Use Watson Visual Recognition to identify grocery items
+          identifiedItems = await _watsonService!.identifyGroceryItems(
+            imageBytes,
+            threshold: 0.5, // 50% confidence threshold
+          );
+          
+          if (!mounted) return;
+          
+          if (identifiedItems.isNotEmpty) {
+            // Show AI-identified items with confidence scores
+            final confirmedItems = await _showAIConfirmationDialog(identifiedItems);
+            if (confirmedItems != null && mounted) {
+              Navigator.pop(context, confirmedItems);
+              return;
+            }
+          }
+        } catch (e) {
+          debugPrint('Watson AI recognition failed: $e');
+          // Fall through to OCR as backup
+        }
+      }
 
-      // Parse text to extract item names
-      final items = _parseItemsFromText(recognizedText.text);
+      // Fall back to OCR if AI didn't work or mode is 'ocr'
+      if (_recognitionMode == 'ocr' || identifiedItems.isEmpty) {
+        // Convert to InputImage for ML Kit
+        final inputImage = InputImage.fromFilePath(image.path);
 
-      if (!mounted) return;
+        // Process with OCR
+        final RecognizedText recognizedText =
+            await _textRecognizer.processImage(inputImage);
 
-      if (items.isEmpty) {
-        _showNoTextFoundDialog();
-      } else {
-        // Show confirmation dialog
-        final confirmedItems = await _showConfirmationDialog(items);
-        if (confirmedItems != null && mounted) {
-          // Return items to calling screen
-          Navigator.pop(context, confirmedItems);
+        // Parse text to extract item names
+        final items = _parseItemsFromText(recognizedText.text);
+
+        if (!mounted) return;
+
+        if (items.isEmpty) {
+          _showNoItemsFoundDialog();
+        } else {
+          // Show confirmation dialog
+          final confirmedItems = await _showConfirmationDialog(items);
+          if (confirmedItems != null && mounted) {
+            // Return items to calling screen
+            Navigator.pop(context, confirmedItems);
+          }
         }
       }
     } catch (e) {
@@ -253,18 +313,152 @@ class _ScannerScreenState extends State<ScannerScreen>
     );
   }
 
-  /// Show dialog when no text is detected
-  void _showNoTextFoundDialog() {
+  /// Show confirmation dialog for AI-identified items with confidence scores
+  Future<List<String>?> _showAIConfirmationDialog(
+    List<Map<String, dynamic>> identifiedItems,
+  ) async {
+    final selectedItems = <String>[];
+
+    return showDialog<List<String>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.smart_toy, color: Colors.blue),
+              const SizedBox(width: 8),
+              const Text('AI Detected Items'),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Watson AI identified these items. Select to add:',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: identifiedItems.length,
+                    itemBuilder: (context, index) {
+                      final item = identifiedItems[index];
+                      final name = item['name'] as String;
+                      final category = item['category'] as String;
+                      final confidence = item['confidence'] as double;
+                      final isSelected = selectedItems.contains(name);
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        color: isSelected ? Colors.blue.shade50 : null,
+                        child: ListTile(
+                          leading: Icon(
+                            _getCategoryIcon(category),
+                            color: isSelected ? Colors.blue : Colors.grey,
+                          ),
+                          title: Text(
+                            name,
+                            style: TextStyle(
+                              fontWeight: isSelected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '$category • ${(confidence * 100).toStringAsFixed(0)}% confidence',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          trailing: Checkbox(
+                            value: isSelected,
+                            onChanged: (checked) {
+                              setDialogState(() {
+                                if (checked == true) {
+                                  selectedItems.add(name);
+                                } else {
+                                  selectedItems.remove(name);
+                                }
+                              });
+                            },
+                          ),
+                          onTap: () {
+                            setDialogState(() {
+                              if (isSelected) {
+                                selectedItems.remove(name);
+                              } else {
+                                selectedItems.add(name);
+                              }
+                            });
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                // Switch to OCR mode and retry
+                setState(() => _recognitionMode = 'ocr');
+                Navigator.pop(context);
+                _captureAndProcess();
+              },
+              child: const Text('Try OCR Instead'),
+            ),
+            ElevatedButton(
+              onPressed: selectedItems.isEmpty
+                  ? null
+                  : () => Navigator.pop(context, selectedItems),
+              child: Text('Add ${selectedItems.length} Items'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Get icon for category
+  IconData _getCategoryIcon(String category) {
+    switch (category.toLowerCase()) {
+      case 'fruit':
+        return Icons.apple;
+      case 'vegetable':
+        return Icons.eco;
+      case 'dairy':
+        return Icons.water_drop;
+      case 'meat':
+        return Icons.set_meal;
+      case 'grain':
+        return Icons.grain;
+      case 'beverage':
+        return Icons.local_drink;
+      default:
+        return Icons.shopping_basket;
+    }
+  }
+
+  /// Show dialog when no items are detected
+  void _showNoItemsFoundDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('No Text Found'),
+        title: const Text('No Items Found'),
         content: const Text(
-          'Could not detect any text in the image. Please try:\n\n'
+          'Could not detect any items in the image. Please try:\n\n'
           '• Better lighting\n'
           '• Holding camera steady\n'
-          '• Moving closer to the label\n'
-          '• Ensuring text is clear and visible',
+          '• Moving closer to the item\n'
+          '• Ensuring item is clearly visible\n'
+          '• Using OCR mode for product labels',
         ),
         actions: [
           TextButton(
@@ -312,13 +506,66 @@ class _ScannerScreenState extends State<ScannerScreen>
       appBar: AppBar(
         title: const Text('Scan Grocery Item'),
         actions: [
-          if (_isCameraInitialized)
+          if (_isCameraInitialized) ...[
+            // Mode toggle button
+            PopupMenuButton<String>(
+              icon: Icon(
+                _recognitionMode == 'ai' ? Icons.smart_toy : Icons.text_fields,
+              ),
+              tooltip: 'Recognition Mode',
+              onSelected: (mode) {
+                setState(() => _recognitionMode = mode);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      mode == 'ai'
+                          ? 'AI Mode: Identifies items from images'
+                          : 'OCR Mode: Reads text from labels',
+                    ),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'ai',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.smart_toy,
+                        color: _recognitionMode == 'ai'
+                            ? Colors.blue
+                            : Colors.grey,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('AI Recognition'),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'ocr',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.text_fields,
+                        color: _recognitionMode == 'ocr'
+                            ? Colors.blue
+                            : Colors.grey,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('OCR Text'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             IconButton(
               icon: Icon(
                 _flashMode == FlashMode.off ? Icons.flash_off : Icons.flash_on,
               ),
               onPressed: _toggleFlash,
             ),
+          ],
         ],
       ),
       body: _buildBody(),
@@ -384,9 +631,41 @@ class _ScannerScreenState extends State<ScannerScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            'Point camera at product label',
-            style: TextStyle(
+          // Mode indicator
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _recognitionMode == 'ai'
+                  ? Colors.blue.withOpacity(0.8)
+                  : Colors.orange.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _recognitionMode == 'ai' ? Icons.smart_toy : Icons.text_fields,
+                  color: Colors.white,
+                  size: 16,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _recognitionMode == 'ai' ? 'AI Mode' : 'OCR Mode',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _recognitionMode == 'ai'
+                ? 'Point camera at grocery item'
+                : 'Point camera at product label',
+            style: const TextStyle(
               color: Colors.white,
               fontSize: 16,
               fontWeight: FontWeight.w500,

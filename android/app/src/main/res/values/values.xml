@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Firebase configuration values extracted from google-services.json -->
+    <string name="default_web_client_id" translatable="false">609350032274-web-client-id</string>
+    <string name="firebase_database_url" translatable="false">https://smart-grocery-optimizer.firebaseio.com</string>
+    <string name="gcm_defaultSenderId" translatable="false">609350032274</string>
+    <string name="google_api_key" translatable="false">AIzaSyBwyFoHKcBJlRBRu1o77Nod--DPpozq3hA</string>
+    <string name="google_app_id" translatable="false">1:609350032274:android:ee1dae94c2c409e014ff4b</string>
+    <string name="google_storage_bucket" translatable="false">smart-grocery-optimizer.firebasestorage.app</string>
+    <string name="project_id" translatable="false">smart-grocery-optimizer</string>
+</resources>
+
+<!-- Made with Bob -->

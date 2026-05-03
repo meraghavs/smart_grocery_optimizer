@@ -1,111 +1,60 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../models/budget.dart';
-import '../models/shopping_list.dart';
-import '../services/price_api.dart';
+import '../providers/shopping_list_provider.dart';
 
-/// Budget tracking screen with real-time price fetching and analytics
-/// 
+/// Budget tracking screen with real-time shopping list integration
+///
 /// Features:
-/// - Real-time shopping list cost estimation
+/// - Real shopping list cost estimation
 /// - Weekly spending bar chart by category
 /// - Budget alerts at 80% threshold
 /// - Category breakdown
 /// - Monthly spending summary
-class BudgetScreen extends StatefulWidget {
+/// - Add expenses functionality
+class BudgetScreen extends ConsumerStatefulWidget {
   const BudgetScreen({super.key});
 
   @override
-  State<BudgetScreen> createState() => _BudgetScreenState();
+  ConsumerState<BudgetScreen> createState() => _BudgetScreenState();
 }
 
-class _BudgetScreenState extends State<BudgetScreen> {
-  // Services
-  late final PriceApiService _priceApi;
-  
+class _BudgetScreenState extends ConsumerState<BudgetScreen> {
   // State variables
   bool _isLoading = false;
   double _monthlyBudget = 500.0; // Default budget
   double _currentSpending = 0.0;
-  double _estimatedShoppingListCost = 0.0;
   Map<String, double> _weeklySpendingByCategory = {};
   List<Budget> _recentExpenses = [];
-  Map<String, dynamic>? _priceEstimation;
-  
-  // Mock shopping list for demonstration
-  final List<Map<String, dynamic>> _mockShoppingList = [
-    {'name': 'Milk', 'quantity': 2},
-    {'name': 'Bread', 'quantity': 1},
-    {'name': 'Eggs', 'quantity': 1},
-    {'name': 'Cheese', 'quantity': 1},
-    {'name': 'Chicken', 'quantity': 2},
-    {'name': 'Rice', 'quantity': 1},
-    {'name': 'Tomatoes', 'quantity': 3},
-    {'name': 'Apples', 'quantity': 2},
-  ];
 
   @override
   void initState() {
     super.initState();
-    _priceApi = PriceApiService(
-      apiKey: 'demo_key',
-      baseUrl: 'https://api.pricefeeds.com',
-    );
     _loadBudgetData();
   }
 
-  /// Loads budget data and fetches real-time prices
+  /// Loads budget data
   Future<void> _loadBudgetData() async {
     setState(() => _isLoading = true);
 
     try {
-      // Fetch real-time prices for shopping list
-      final estimation = await _priceApi.estimateTotalCost(
-        items: _mockShoppingList,
-      );
 
-      // Mock current spending data (replace with Firebase data)
-      _currentSpending = 342.50;
+      // Initialize with existing expenses
+      _currentSpending = _recentExpenses.fold(0.0, (sum, expense) => sum + expense.amount);
       
-      // Mock weekly spending by category
-      _weeklySpendingByCategory = {
-        'Groceries': 120.50,
-        'Dairy': 45.30,
-        'Meat': 89.20,
-        'Produce': 52.80,
-        'Bakery': 34.70,
-      };
-
-      // Mock recent expenses
-      _recentExpenses = [
-        Budget(
-          id: '1',
-          userId: 'user123',
-          amount: 45.67,
-          category: 'Groceries',
-          date: DateTime.now().subtract(const Duration(days: 1)),
-          description: 'Weekly shopping',
-          type: BudgetType.expense,
-        ),
-        Budget(
-          id: '2',
-          userId: 'user123',
-          amount: 23.45,
-          category: 'Dairy',
-          date: DateTime.now().subtract(const Duration(days: 3)),
-          description: 'Milk and cheese',
-          type: BudgetType.expense,
-        ),
-      ];
+      // Calculate category spending from expenses
+      _weeklySpendingByCategory = {};
+      for (var expense in _recentExpenses) {
+        _weeklySpendingByCategory[expense.category] =
+            (_weeklySpendingByCategory[expense.category] ?? 0) + expense.amount;
+      }
 
       setState(() {
-        _priceEstimation = estimation;
-        _estimatedShoppingListCost = estimation['total'] as double;
         _isLoading = false;
       });
 
-      // Check budget alert
-      _checkBudgetAlert();
+      // Check budget alert is done in build method with actual data
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
@@ -117,8 +66,8 @@ class _BudgetScreenState extends State<BudgetScreen> {
   }
 
   /// Checks if user has reached 80% of budget and shows alert
-  void _checkBudgetAlert() {
-    final projectedTotal = _currentSpending + _estimatedShoppingListCost;
+  void _checkBudgetAlert(double estimatedShoppingListCost) {
+    final projectedTotal = _currentSpending + estimatedShoppingListCost;
     final budgetPercentage = (projectedTotal / _monthlyBudget) * 100;
 
     if (budgetPercentage >= 80 && budgetPercentage < 100) {
@@ -193,7 +142,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
                 _monthlyBudget = double.tryParse(controller.text) ?? 500.0;
               });
               Navigator.pop(context);
-              _checkBudgetAlert();
+              // Budget alert will be checked on next build
             },
             child: const Text('Save'),
           ),
@@ -204,6 +153,13 @@ class _BudgetScreenState extends State<BudgetScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Get actual shopping list data
+    final shoppingItems = ref.watch(shoppingListProvider);
+    final estimatedShoppingListCost = shoppingItems.fold<double>(
+      0,
+      (sum, item) => sum + (item.estimatedPrice ?? 0),
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Budget Tracker'),
@@ -230,9 +186,9 @@ class _BudgetScreenState extends State<BudgetScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildBudgetSummaryCard(),
+                    _buildBudgetSummaryCard(estimatedShoppingListCost),
                     const SizedBox(height: 16),
-                    _buildShoppingListEstimateCard(),
+                    _buildShoppingListEstimateCard(shoppingItems, estimatedShoppingListCost),
                     const SizedBox(height: 16),
                     _buildWeeklySpendingChart(),
                     const SizedBox(height: 16),
@@ -252,8 +208,8 @@ class _BudgetScreenState extends State<BudgetScreen> {
   }
 
   /// Budget summary card with progress indicator
-  Widget _buildBudgetSummaryCard() {
-    final projectedTotal = _currentSpending + _estimatedShoppingListCost;
+  Widget _buildBudgetSummaryCard(double estimatedShoppingListCost) {
+    final projectedTotal = _currentSpending + estimatedShoppingListCost;
     final budgetPercentage = (projectedTotal / _monthlyBudget).clamp(0.0, 1.0);
     final remaining = _monthlyBudget - projectedTotal;
 
@@ -304,7 +260,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
                 ),
                 _buildBudgetStat(
                   'Projected',
-                  '\$${_estimatedShoppingListCost.toStringAsFixed(2)}',
+                  '\$${estimatedShoppingListCost.toStringAsFixed(2)}',
                   Colors.orange,
                 ),
                 _buildBudgetStat(
@@ -348,16 +304,11 @@ class _BudgetScreenState extends State<BudgetScreen> {
     );
   }
 
-  /// Shopping list estimate card with real-time prices
-  Widget _buildShoppingListEstimateCard() {
-    if (_priceEstimation == null) {
+  /// Shopping list estimate card with actual shopping list items
+  Widget _buildShoppingListEstimateCard(dynamic shoppingItems, double total) {
+    if (shoppingItems.isEmpty) {
       return const SizedBox.shrink();
     }
-
-    final items = _priceEstimation!['items'] as List<Map<String, dynamic>>;
-    final subtotal = _priceEstimation!['subtotal'] as double;
-    final tax = _priceEstimation!['tax'] as double;
-    final total = _priceEstimation!['total'] as double;
 
     return Card(
       elevation: 4,
@@ -368,7 +319,7 @@ class _BudgetScreenState extends State<BudgetScreen> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         subtitle: Text(
-          'Total: \$${total.toStringAsFixed(2)}',
+          'Total: \$${total.toStringAsFixed(2)} (${shoppingItems.length} items)',
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
         children: [
@@ -376,33 +327,42 @@ class _BudgetScreenState extends State<BudgetScreen> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                ...items.map((item) => Padding(
+                ...shoppingItems.map((item) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
                         child: Text(
-                          '${item['name']} (${item['quantity']}x)',
+                          '${item.name} (${item.quantity} ${item.unit})',
                           style: TextStyle(
-                            color: item['estimated'] == true
+                            decoration: item.isPurchased
+                                ? TextDecoration.lineThrough
+                                : null,
+                            color: item.isPurchased
                                 ? Colors.grey[600]
                                 : Colors.black,
                           ),
                         ),
                       ),
                       Text(
-                        '\$${(item['total'] as double).toStringAsFixed(2)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                        item.estimatedPrice != null
+                            ? '\$${item.estimatedPrice!.toStringAsFixed(2)}'
+                            : 'N/A',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          decoration: item.isPurchased
+                              ? TextDecoration.lineThrough
+                              : null,
+                        ),
                       ),
                     ],
                   ),
                 )),
-                const Divider(),
-                _buildPriceRow('Subtotal', subtotal),
-                _buildPriceRow('Tax (8%)', tax),
-                const Divider(thickness: 2),
-                _buildPriceRow('Total', total, bold: true),
+                if (total > 0) ...[
+                  const Divider(thickness: 2),
+                  _buildPriceRow('Total', total, bold: true),
+                ],
               ],
             ),
           ),
@@ -436,6 +396,35 @@ class _BudgetScreenState extends State<BudgetScreen> {
 
   /// Weekly spending bar chart by category
   Widget _buildWeeklySpendingChart() {
+    if (_weeklySpendingByCategory.isEmpty) {
+      return Card(
+        elevation: 4,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Weekly Spending by Category',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 24),
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Text(
+                    'No expenses yet. Add an expense to see the chart.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Card(
       elevation: 4,
       child: Padding(
@@ -541,6 +530,35 @@ class _BudgetScreenState extends State<BudgetScreen> {
 
   /// Category breakdown pie chart
   Widget _buildCategoryBreakdown() {
+    if (_weeklySpendingByCategory.isEmpty) {
+      return Card(
+        elevation: 4,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Category Breakdown',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Text(
+                    'No expenses yet. Add an expense to see category breakdown.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final total = _weeklySpendingByCategory.values.reduce((a, b) => a + b);
 
     return Card(
@@ -648,9 +666,193 @@ class _BudgetScreenState extends State<BudgetScreen> {
   }
 
   void _addExpense() {
-    // TODO: Implement add expense dialog
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Add expense feature coming soon')),
+    final amountController = TextEditingController();
+    final descriptionController = TextEditingController();
+    String selectedCategory = 'Groceries';
+    DateTime selectedDate = DateTime.now();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.add_circle, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Add Expense',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: amountController,
+                  decoration: const InputDecoration(
+                    labelText: 'Amount',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.attach_money),
+                    prefixText: '\$',
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: descriptionController,
+                  decoration: const InputDecoration(
+                    labelText: 'Description',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.description),
+                    hintText: 'e.g., Weekly grocery shopping',
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedCategory,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.category),
+                  ),
+                  items: [
+                    'Groceries',
+                    'Dairy',
+                    'Meat',
+                    'Produce',
+                    'Bakery',
+                    'Beverages',
+                    'Snacks',
+                    'Other'
+                  ]
+                      .map((category) => DropdownMenuItem(
+                            value: category,
+                            child: Text(category),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => selectedCategory = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  title: const Text('Date'),
+                  subtitle: Text(
+                    '${selectedDate.day}/${selectedDate.month}/${selectedDate.year}',
+                  ),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final date = await showDatePicker(
+                      context: context,
+                      initialDate: selectedDate,
+                      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                      lastDate: DateTime.now(),
+                    );
+                    if (date != null) {
+                      setState(() => selectedDate = date);
+                    }
+                  },
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(color: Colors.grey[400]!),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (amountController.text.isEmpty ||
+                              descriptionController.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please fill in all required fields'),
+                              ),
+                            );
+                            return;
+                          }
+
+                          final amount = double.tryParse(amountController.text);
+                          if (amount == null || amount <= 0) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please enter a valid amount'),
+                              ),
+                            );
+                            return;
+                          }
+
+                          // Create new expense
+                          final expense = Budget(
+                            id: DateTime.now().millisecondsSinceEpoch.toString(),
+                            userId: 'user123', // TODO: Get from auth
+                            amount: amount,
+                            category: selectedCategory,
+                            date: selectedDate,
+                            description: descriptionController.text,
+                            type: BudgetType.expense,
+                          );
+
+                          // Add to recent expenses and update spending
+                          this.setState(() {
+                            _recentExpenses.insert(0, expense);
+                            _currentSpending += amount;
+                            
+                            // Update category spending
+                            _weeklySpendingByCategory[selectedCategory] =
+                                (_weeklySpendingByCategory[selectedCategory] ?? 0) + amount;
+                          });
+
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Expense of \$${amount.toStringAsFixed(2)} added'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+
+                          // Check budget alert after adding expense
+                          final shoppingItems = ref.read(shoppingListProvider);
+                          final estimatedCost = shoppingItems.fold<double>(
+                            0,
+                            (sum, item) => sum + (item.estimatedPrice ?? 0),
+                          );
+                          _checkBudgetAlert(estimatedCost);
+                        },
+                        child: const Text('Add Expense'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

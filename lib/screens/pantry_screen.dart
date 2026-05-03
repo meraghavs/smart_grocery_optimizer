@@ -13,11 +13,16 @@ import 'package:smart_grocery_optimizer/screens/scanner_screen.dart';
 /// - Add/edit/delete items
 /// - Scan new items
 
-class PantryScreen extends ConsumerWidget {
+class PantryScreen extends ConsumerStatefulWidget {
   const PantryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PantryScreen> createState() => _PantryScreenState();
+}
+
+class _PantryScreenState extends ConsumerState<PantryScreen> {
+  @override
+  Widget build(BuildContext context) {
     final pantryItems = ref.watch(pantryProvider);
 
     return Scaffold(
@@ -76,14 +81,23 @@ class PantryScreen extends ConsumerWidget {
                         color: isExpiringSoon ? Colors.orange : null,
                       ),
                     ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () {
-                        ref.read(pantryProvider.notifier).removeItem(item.id);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('${item.name} removed')),
-                        );
-                      },
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.blue),
+                          onPressed: () => _showEditItemDialog(item),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () {
+                            ref.read(pantryProvider.notifier).removeItem(item.id);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('${item.name} removed')),
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -94,13 +108,13 @@ class PantryScreen extends ConsumerWidget {
         children: [
           FloatingActionButton(
             heroTag: 'camera_fab',
-            onPressed: () => _openScanner(context, ref),
+            onPressed: _openScanner,
             child: const Icon(Icons.camera_alt),
           ),
           const SizedBox(height: 16),
           FloatingActionButton(
             heroTag: 'add_fab',
-            onPressed: () => _showAddItemDialog(context, ref),
+            onPressed: _showAddItemDialog,
             child: const Icon(Icons.add),
           ),
         ],
@@ -109,23 +123,19 @@ class PantryScreen extends ConsumerWidget {
   }
 
   /// Open scanner and show detected items in bottom sheet
-  Future<void> _openScanner(BuildContext context, WidgetRef ref) async {
+  Future<void> _openScanner() async {
     final detectedItems = await Navigator.push<List<String>>(
       context,
       MaterialPageRoute(builder: (context) => const ScannerScreen()),
     );
 
-    if (detectedItems != null && detectedItems.isNotEmpty && context.mounted) {
-      _showDetectedItemsBottomSheet(context, ref, detectedItems);
+    if (detectedItems != null && detectedItems.isNotEmpty && mounted) {
+      _showDetectedItemsBottomSheet(detectedItems);
     }
   }
 
   /// Show bottom sheet with detected items and checkboxes
-  void _showDetectedItemsBottomSheet(
-    BuildContext context,
-    WidgetRef ref,
-    List<String> detectedItems,
-  ) {
+  void _showDetectedItemsBottomSheet(List<String> detectedItems) {
     final selectedItems = <String, bool>{
       for (var item in detectedItems) item: true,
     };
@@ -267,7 +277,7 @@ class PantryScreen extends ConsumerWidget {
     );
   }
 
-  void _showAddItemDialog(BuildContext context, WidgetRef ref) {
+  void _showAddItemDialog() {
     final nameController = TextEditingController();
     final quantityController = TextEditingController();
     final priceController = TextEditingController();
@@ -446,6 +456,204 @@ class PantryScreen extends ConsumerWidget {
                           );
                         },
                         child: const Text('Add Item'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showEditItemDialog(GroceryItem item) {
+    final nameController = TextEditingController(text: item.name);
+    final quantityController = TextEditingController(text: item.quantity.toString());
+    final priceController = TextEditingController(text: item.price.toString());
+    String selectedUnit = item.unit;
+    String selectedCategory = item.category;
+    DateTime selectedDate = item.expiryDate;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.edit, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Edit Pantry Item',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Item Name',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.shopping_bag),
+                  ),
+                  textCapitalization: TextCapitalization.words,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: quantityController,
+                        decoration: const InputDecoration(
+                          labelText: 'Quantity',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedUnit,
+                        decoration: const InputDecoration(
+                          labelText: 'Unit',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: ['pcs', 'kg', 'g', 'L', 'ml', 'lb', 'oz']
+                            .map((unit) => DropdownMenuItem(
+                                  value: unit,
+                                  child: Text(unit),
+                                ))
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => selectedUnit = value);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: selectedCategory,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.category),
+                  ),
+                  items: [
+                    'Dairy',
+                    'Meat',
+                    'Vegetables',
+                    'Fruits',
+                    'Bakery',
+                    'Beverages',
+                    'Snacks',
+                    'Other'
+                  ]
+                      .map((category) => DropdownMenuItem(
+                            value: category,
+                            child: Text(category),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => selectedCategory = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: priceController,
+                  decoration: const InputDecoration(
+                    labelText: 'Price',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.attach_money),
+                  ),
+                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  title: const Text('Expiry Date'),
+                  subtitle: Text(
+                    '${selectedDate.day}/${selectedDate.month}/${selectedDate.year}',
+                  ),
+                  trailing: const Icon(Icons.calendar_today),
+                  onTap: () async {
+                    final date = await showDatePicker(
+                      context: context,
+                      initialDate: selectedDate,
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (date != null) {
+                      setState(() => selectedDate = date);
+                    }
+                  },
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(color: Colors.grey[400]!),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (nameController.text.isEmpty ||
+                              quantityController.text.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Please fill in all required fields'),
+                              ),
+                            );
+                            return;
+                          }
+
+                          final updatedItem = GroceryItem(
+                            id: item.id,
+                            userId: item.userId,
+                            name: nameController.text,
+                            category: selectedCategory,
+                            quantity: int.tryParse(quantityController.text) ?? 1,
+                            unit: selectedUnit,
+                            expiryDate: selectedDate,
+                            purchaseDate: item.purchaseDate,
+                            price: double.tryParse(priceController.text) ?? 0,
+                          );
+
+                          ref.read(pantryProvider.notifier).updateItem(updatedItem);
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('${updatedItem.name} updated')),
+                          );
+                        },
+                        child: const Text('Save Changes'),
                       ),
                     ),
                   ],
