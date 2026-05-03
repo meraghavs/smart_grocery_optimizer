@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "609350032274",
+    "project_id": "smart-grocery-optimizer",
+    "storage_bucket": "smart-grocery-optimizer.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:609350032274:android:ee1dae94c2c409e014ff4b",
+        "android_client_info": {
+          "package_name": "com.example.smart_grocery_optimizer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBwyFoHKcBJlRBRu1o77Nod--DPpozq3hA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
