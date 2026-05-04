@@ -1,0 +1,30 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 7
+    },
+    "auditLog": "/home/ubuntu/.bobide/logs/.ab96d9a7c7c40ff0f414dabc16d62e27e60f870f-audit.json",
+    "files": [
+        {
+            "date": 1777645141810,
+            "name": "/home/ubuntu/.bobide/logs/bob-code-2026-05-01.error.log",
+            "hash": "dfc428d063b2543b5ea63a6ffb520b1d31cf38763c3ea917dca06f9f9710f362"
+        },
+        {
+            "date": 1777694856944,
+            "name": "/home/ubuntu/.bobide/logs/bob-code-2026-05-02.error.log",
+            "hash": "fdb7a0f02ee39d195972aa56814e47d9b77f072d0963c88f6a9564d10d4026de"
+        },
+        {
+            "date": 1777766659670,
+            "name": "/home/ubuntu/.bobide/logs/bob-code-2026-05-03.error.log",
+            "hash": "ca3005aa7289a24d81a829ecf28424135991958502e7eb75d9d628df6565a95d"
+        },
+        {
+            "date": 1777853843599,
+            "name": "/home/ubuntu/.bobide/logs/bob-code-2026-05-04.error.log",
+            "hash": "da262388b858ba654a72e1ca00caa8825b517e1933ce575fa4c4084234ea4b20"
+        }
+    ],
+    "hashType": "sha256"
+}

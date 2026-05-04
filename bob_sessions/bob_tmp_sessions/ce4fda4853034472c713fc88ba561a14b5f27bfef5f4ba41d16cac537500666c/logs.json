@@ -1,0 +1,16 @@
+[
+  {
+    "sessionId": "2818b75f-74cd-4b33-a220-10a1c85833f8",
+    "messageId": 0,
+    "type": "user",
+    "message": "off",
+    "timestamp": "2026-05-01T13:33:11.398Z"
+  },
+  {
+    "sessionId": "2818b75f-74cd-4b33-a220-10a1c85833f8",
+    "messageId": 1,
+    "type": "user",
+    "message": "exit",
+    "timestamp": "2026-05-01T13:33:39.059Z"
+  }
+]
