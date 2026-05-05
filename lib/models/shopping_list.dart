@@ -1,3 +1,5 @@
+import 'package:smart_grocery_optimizer/models/item_source_list.dart';
+
 /// Model representing a shopping list
 /// 
 /// Contains a collection of items to purchase and metadata
@@ -214,6 +216,7 @@ class ShoppingListItem {
   final bool isPurchased;
   final DateTime addedDate;
   final String? notes;
+  final ItemSourceList sourceList;
 
   const ShoppingListItem({
     required this.id,
@@ -226,6 +229,7 @@ class ShoppingListItem {
     this.isPurchased = false,
     required this.addedDate,
     this.notes,
+    this.sourceList = ItemSourceList.shoppingList,
   });
 
   /// Creates a ShoppingListItem from JSON data
@@ -243,6 +247,12 @@ class ShoppingListItem {
       isPurchased: json['isPurchased'] as bool? ?? false,
       addedDate: DateTime.parse(json['addedDate'] as String),
       notes: json['notes'] as String?,
+      sourceList: json['sourceList'] != null
+          ? ItemSourceList.values.firstWhere(
+              (e) => e.toString() == 'ItemSourceList.${json['sourceList']}',
+              orElse: () => ItemSourceList.shoppingList,
+            )
+          : ItemSourceList.shoppingList,
     );
   }
 
@@ -259,6 +269,7 @@ class ShoppingListItem {
       'isPurchased': isPurchased,
       'addedDate': addedDate.toIso8601String(),
       'notes': notes,
+      'sourceList': sourceList.toString().split('.').last,
     };
   }
 
@@ -274,6 +285,7 @@ class ShoppingListItem {
     bool? isPurchased,
     DateTime? addedDate,
     String? notes,
+    ItemSourceList? sourceList,
   }) {
     return ShoppingListItem(
       id: id ?? this.id,
@@ -286,6 +298,7 @@ class ShoppingListItem {
       isPurchased: isPurchased ?? this.isPurchased,
       addedDate: addedDate ?? this.addedDate,
       notes: notes ?? this.notes,
+      sourceList: sourceList ?? this.sourceList,
     );
   }
 

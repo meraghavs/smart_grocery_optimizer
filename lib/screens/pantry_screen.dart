@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_grocery_optimizer/models/grocery_item.dart';
 import 'package:smart_grocery_optimizer/providers/pantry_provider.dart';
+import 'package:smart_grocery_optimizer/providers/shopping_list_provider.dart';
 import 'package:smart_grocery_optimizer/screens/scanner_screen.dart';
 
 /// Pantry management screen
@@ -57,52 +58,77 @@ class _PantryScreenState extends ConsumerState<PantryScreen> {
               ),
             )
           : ListView.builder(
-              itemCount: pantryItems.length,
-              padding: const EdgeInsets.all(8),
-              itemBuilder: (context, index) {
-                final item = pantryItems[index];
-                final daysUntilExpiry = item.expiryDate.difference(DateTime.now()).inDays;
-                final isExpiringSoon = daysUntilExpiry <= 7;
-                
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: isExpiringSoon ? Colors.orange : Colors.green,
-                      child: Text(
-                        item.name[0].toUpperCase(),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                    title: Text(item.name),
-                    subtitle: Text(
-                      '${item.quantity} ${item.unit} • Expires in $daysUntilExpiry days',
-                      style: TextStyle(
-                        color: isExpiringSoon ? Colors.orange : null,
-                      ),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _showEditItemDialog(item),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () {
-                            ref.read(pantryProvider.notifier).removeItem(item.id);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('${item.name} removed')),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
+             itemCount: pantryItems.length,
+             padding: const EdgeInsets.all(8),
+             itemBuilder: (context, index) {
+               final item = pantryItems[index];
+               final daysUntilExpiry = item.expiryDate.difference(DateTime.now()).inDays;
+               final isExpiringSoon = daysUntilExpiry <= 7;
+               
+               return Dismissible(
+                 key: Key(item.id),
+                 direction: DismissDirection.startToEnd,
+                 background: Container(
+                   alignment: Alignment.centerLeft,
+                   padding: const EdgeInsets.only(left: 20),
+                   color: Colors.green,
+                   child: const Row(
+                     children: [
+                       Icon(Icons.shopping_cart, color: Colors.white),
+                       SizedBox(width: 8),
+                       Text(
+                         'Move to Shopping List',
+                         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                       ),
+                     ],
+                   ),
+                 ),
+                 onDismissed: (direction) async {
+                   await _moveToShoppingList(item);
+                 },
+                 child: Card(
+                   margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                   child: InkWell(
+                     onLongPress: () => _showContextMenu(context, item),
+                     child: ListTile(
+                       leading: CircleAvatar(
+                         backgroundColor: isExpiringSoon ? Colors.orange : Colors.green,
+                         child: Text(
+                           item.name[0].toUpperCase(),
+                           style: const TextStyle(color: Colors.white),
+                         ),
+                       ),
+                       title: Text(item.name),
+                       subtitle: Text(
+                         '${item.quantity} ${item.unit} • Expires in $daysUntilExpiry days',
+                         style: TextStyle(
+                           color: isExpiringSoon ? Colors.orange : null,
+                         ),
+                       ),
+                       trailing: Row(
+                         mainAxisSize: MainAxisSize.min,
+                         children: [
+                           IconButton(
+                             icon: const Icon(Icons.edit, color: Colors.blue),
+                             onPressed: () => _showEditItemDialog(item),
+                           ),
+                           IconButton(
+                             icon: const Icon(Icons.delete, color: Colors.red),
+                             onPressed: () {
+                               ref.read(pantryProvider.notifier).removeItem(item.id);
+                               ScaffoldMessenger.of(context).showSnackBar(
+                                 SnackBar(content: Text('${item.name} removed')),
+                               );
+                             },
+                           ),
+                         ],
+                       ),
+                     ),
+                   ),
+                 ),
+               );
+             },
+           ),
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
@@ -118,6 +144,90 @@ class _PantryScreenState extends ConsumerState<PantryScreen> {
             child: const Icon(Icons.add),
           ),
         ],
+      ),
+    );
+ }
+
+ /// Move item to shopping list with undo option
+ Future<bool> _moveToShoppingList(GroceryItem item) async {
+   final shoppingItem = await ref.read(pantryProvider.notifier).moveToShoppingList(item.id);
+   
+   if (shoppingItem != null && mounted) {
+     // Wait a moment for Firestore to propagate
+     await Future.delayed(const Duration(milliseconds: 500));
+     
+     // Reload shopping list to show the new item
+     await ref.read(shoppingListProvider.notifier).reloadAfterTransfer();
+     
+     // Show snackbar with undo
+     if (mounted) {
+       ScaffoldMessenger.of(context).showSnackBar(
+       SnackBar(
+         content: Text('${item.name} moved to Shopping List'),
+         backgroundColor: Colors.green,
+         action: SnackBarAction(
+           label: 'Undo',
+           textColor: Colors.white,
+           onPressed: () async {
+             // Undo: move back to pantry
+             final pantryItem = await ref.read(shoppingListProvider.notifier).moveToPantry(item.id);
+             if (pantryItem != null) {
+               await Future.delayed(const Duration(milliseconds: 500));
+               await ref.read(pantryProvider.notifier).reloadAfterTransfer();
+             }
+           },
+         ),
+       ),
+       );
+     }
+     return true;
+   }
+   return false;
+ }
+
+  /// Show context menu for item actions
+  void _showContextMenu(BuildContext context, GroceryItem item) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.shopping_cart, color: Colors.green),
+              title: const Text('Move to Shopping List'),
+              onTap: () {
+                Navigator.pop(context);
+                _moveToShoppingList(item);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.kitchen, color: Colors.grey),
+              title: const Text('Move to Pantry'),
+              enabled: false,
+              subtitle: const Text('Already in pantry'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit, color: Colors.blue),
+              title: const Text('Edit Item'),
+              onTap: () {
+                Navigator.pop(context);
+                _showEditItemDialog(item);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text('Delete Item'),
+              onTap: () {
+                Navigator.pop(context);
+                ref.read(pantryProvider.notifier).removeItem(item.id);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('${item.name} removed')),
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

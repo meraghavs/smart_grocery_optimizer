@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:smart_grocery_optimizer/models/shopping_list.dart';
+import 'package:smart_grocery_optimizer/models/grocery_item.dart';
+import 'package:smart_grocery_optimizer/models/item_source_list.dart';
+import 'package:smart_grocery_optimizer/services/transfer_service.dart';
 
 /// Shopping list items state provider with Firestore persistence
 /// 
@@ -10,22 +13,26 @@ import 'package:smart_grocery_optimizer/models/shopping_list.dart';
 class ShoppingListNotifier extends StateNotifier<List<ShoppingListItem>> {
   final FirebaseFirestore _firestore;
   final String _userId;
+  final TransferService _transferService;
   
-  ShoppingListNotifier(this._firestore, this._userId) : super([]) {
-    _loadItems();
+  ShoppingListNotifier(this._firestore, this._userId, this._transferService) : super([]) {
+    loadItems();
   }
 
   /// Load items from Firestore
-  Future<void> _loadItems() async {
+  Future<void> loadItems() async {
     try {
+      print('DEBUG: Loading shopping list items from Firestore');
       final snapshot = await _firestore
           .collection('shopping_list')
           .where('userId', isEqualTo: _userId)
           .get();
       
+      print('DEBUG: Found ${snapshot.docs.length} shopping list items');
       state = snapshot.docs
           .map((doc) => ShoppingListItem.fromJson({...doc.data(), 'id': doc.id}))
           .toList();
+      print('DEBUG: Shopping list state updated with ${state.length} items');
     } catch (e) {
       print('Error loading shopping list items: $e');
     }
@@ -149,7 +156,78 @@ class ShoppingListNotifier extends StateNotifier<List<ShoppingListItem>> {
       print('Error clearing purchased items: $e');
     }
   }
+  
+  /// Move item to pantry
+  /// Returns the created GroceryItem for adding to pantry provider
+  Future<GroceryItem?> moveToPantry(String itemId) async {
+    try {
+      final item = state.firstWhere((item) => item.id == itemId);
+      
+      print('DEBUG: Moving item ${item.name} from shopping list to pantry');
+      
+      // Create pantry item from shopping list item
+      final pantryItem = GroceryItem(
+        id: item.id,
+        userId: item.userId,
+        name: item.name,
+        category: item.category,
+        quantity: item.quantity.toInt(),
+        unit: item.unit,
+        expiryDate: DateTime.now().add(const Duration(days: 7)), // Default 7 days
+        purchaseDate: DateTime.now(),
+        price: item.estimatedPrice ?? 0,
+        sourceList: ItemSourceList.pantry,
+      );
+      
+      print('DEBUG: Created pantry item: ${pantryItem.toJson()}');
+      
+      // Add to pantry collection in Firestore FIRST
+      try {
+        print('DEBUG: About to write to Firestore pantry collection...');
+        await _firestore.collection('pantry').doc(itemId).set(pantryItem.toJson());
+        print('DEBUG: Successfully added to pantry collection in Firestore');
+      } catch (firestoreError) {
+        print('DEBUG: Firestore write error: $firestoreError');
+        print('DEBUG: Error type: ${firestoreError.runtimeType}');
+        rethrow;
+      }
+      
+      // Then remove from shopping list state
+      state = state.where((i) => i.id != itemId).toList();
+      print('DEBUG: Removed from shopping list state');
+      
+      // Delete from shopping_list collection in Firestore
+      await _firestore.collection('shopping_list').doc(itemId).delete();
+      print('DEBUG: Deleted from shopping_list collection in Firestore');
+      
+      // Log transfer
+      await _transferService.logTransfer(
+        itemName: item.name,
+        fromList: 'shoppingList',
+        toList: 'pantry',
+        userId: _userId,
+      );
+      print('DEBUG: Transfer logged');
+      
+      return pantryItem;
+    } catch (e, stackTrace) {
+      print('ERROR moving item to pantry: $e');
+      print('Stack trace: $stackTrace');
+      return null;
+    }
+  }
+  
+  /// Reload items after transfer from pantry
+  Future<void> reloadAfterTransfer() async {
+    print('DEBUG: Reloading shopping list after transfer');
+    await loadItems();
+  }
 }
+
+/// Provider for transfer service
+final transferServiceProvider = Provider<TransferService>(
+  (ref) => TransferService(FirebaseFirestore.instance),
+);
 
 /// Provider for shopping list items with Firestore persistence
 final shoppingListProvider =
@@ -157,6 +235,7 @@ final shoppingListProvider =
   (ref) => ShoppingListNotifier(
     FirebaseFirestore.instance,
     'user1', // TODO: Replace with actual user ID from auth
+    ref.watch(transferServiceProvider),
   ),
 );
 

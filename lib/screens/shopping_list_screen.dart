@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:smart_grocery_optimizer/models/shopping_list.dart';
 import 'package:smart_grocery_optimizer/providers/shopping_list_provider.dart';
+import 'package:smart_grocery_optimizer/providers/pantry_provider.dart';
 import 'package:smart_grocery_optimizer/screens/scanner_screen.dart';
 
 /// Shopping list management screen
@@ -105,48 +106,73 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
                     itemBuilder: (context, index) {
                       final item = shoppingItems[index];
                       
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-                        child: ListTile(
-                          leading: Checkbox(
-                            value: item.isPurchased,
-                            onChanged: (value) {
-                              ref.read(shoppingListProvider.notifier).togglePurchased(item.id);
-                            },
-                          ),
-                          title: Text(
-                            item.name,
-                            style: TextStyle(
-                              decoration: item.isPurchased
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                            ),
-                          ),
-                          subtitle: Text(
-                            '${item.quantity} ${item.unit}${item.estimatedPrice != null ? ' • \$${item.estimatedPrice!.toStringAsFixed(2)}' : ''}',
-                            style: TextStyle(
-                              decoration: item.isPurchased
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                            ),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
+                      return Dismissible(
+                        key: Key(item.id),
+                        direction: DismissDirection.startToEnd,
+                        background: Container(
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.only(left: 20),
+                          color: Colors.green,
+                          child: const Row(
                             children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit, color: Colors.blue),
-                                onPressed: () => _showEditItemDialog(item),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () {
-                                  ref.read(shoppingListProvider.notifier).removeItem(item.id);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('${item.name} removed')),
-                                  );
-                                },
+                              Icon(Icons.kitchen, color: Colors.white),
+                              SizedBox(width: 8),
+                              Text(
+                                'Move to Pantry',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                               ),
                             ],
+                          ),
+                        ),
+                        onDismissed: (direction) async {
+                          await _moveToPantry(item);
+                        },
+                        child: Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                          child: InkWell(
+                            onLongPress: () => _showContextMenu(context, item),
+                            child: ListTile(
+                              leading: Checkbox(
+                                value: item.isPurchased,
+                                onChanged: (value) {
+                                  ref.read(shoppingListProvider.notifier).togglePurchased(item.id);
+                                },
+                              ),
+                              title: Text(
+                                item.name,
+                                style: TextStyle(
+                                  decoration: item.isPurchased
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${item.quantity} ${item.unit}${item.estimatedPrice != null ? ' • \$${item.estimatedPrice!.toStringAsFixed(2)}' : ''}',
+                                style: TextStyle(
+                                  decoration: item.isPurchased
+                                      ? TextDecoration.lineThrough
+                                      : null,
+                                ),
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.edit, color: Colors.blue),
+                                    onPressed: () => _showEditItemDialog(item),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete, color: Colors.red),
+                                    onPressed: () {
+                                      ref.read(shoppingListProvider.notifier).removeItem(item.id);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('${item.name} removed')),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       );
@@ -158,6 +184,90 @@ class _ShoppingListScreenState extends ConsumerState<ShoppingListScreen> {
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddItemDialog,
         child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  /// Move item to pantry with undo option
+  Future<bool> _moveToPantry(ShoppingListItem item) async {
+    final pantryItem = await ref.read(shoppingListProvider.notifier).moveToPantry(item.id);
+    
+    if (pantryItem != null && mounted) {
+      // Wait a moment for Firestore to propagate
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Reload pantry to show the new item
+      await ref.read(pantryProvider.notifier).reloadAfterTransfer();
+      
+      // Show snackbar with undo
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${item.name} moved to Pantry'),
+          backgroundColor: Colors.green,
+          action: SnackBarAction(
+            label: 'Undo',
+            textColor: Colors.white,
+            onPressed: () async {
+              // Undo: move back to shopping list
+              final shoppingItem = await ref.read(pantryProvider.notifier).moveToShoppingList(item.id);
+              if (shoppingItem != null) {
+                await Future.delayed(const Duration(milliseconds: 500));
+                await ref.read(shoppingListProvider.notifier).reloadAfterTransfer();
+              }
+            },
+          ),
+        ),
+        );
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// Show context menu for item actions
+  void _showContextMenu(BuildContext context, ShoppingListItem item) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.kitchen, color: Colors.green),
+              title: const Text('Move to Pantry'),
+              onTap: () {
+                Navigator.pop(context);
+                _moveToPantry(item);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.shopping_cart, color: Colors.grey),
+              title: const Text('Move to Shopping List'),
+              enabled: false,
+              subtitle: const Text('Already in shopping list'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit, color: Colors.blue),
+              title: const Text('Edit Item'),
+              onTap: () {
+                Navigator.pop(context);
+                _showEditItemDialog(item);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete, color: Colors.red),
+              title: const Text('Delete Item'),
+              onTap: () {
+                Navigator.pop(context);
+                ref.read(shoppingListProvider.notifier).removeItem(item.id);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('${item.name} removed')),
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

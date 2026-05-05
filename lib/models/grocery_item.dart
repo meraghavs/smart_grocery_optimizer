@@ -1,3 +1,5 @@
+import 'package:smart_grocery_optimizer/models/item_source_list.dart';
+
 /// Model representing a grocery item in the pantry
 ///
 /// This class contains all information about a grocery item including
@@ -14,6 +16,7 @@ class GroceryItem {
   final double price;
   final String? imageUrl;
   final String? barcode;
+  final ItemSourceList sourceList;
 
   const GroceryItem({
     required this.id,
@@ -27,6 +30,7 @@ class GroceryItem {
     required this.price,
     this.imageUrl,
     this.barcode,
+    this.sourceList = ItemSourceList.pantry,
   });
 
   /// Creates a GroceryItem from JSON data
@@ -43,6 +47,12 @@ class GroceryItem {
       price: (json['price'] as num).toDouble(),
       imageUrl: json['imageUrl'] as String?,
       barcode: json['barcode'] as String?,
+      sourceList: json['sourceList'] != null
+          ? ItemSourceList.values.firstWhere(
+              (e) => e.toString() == 'ItemSourceList.${json['sourceList']}',
+              orElse: () => ItemSourceList.pantry,
+            )
+          : ItemSourceList.pantry,
     );
   }
 
@@ -60,6 +70,7 @@ class GroceryItem {
       'price': price,
       'imageUrl': imageUrl,
       'barcode': barcode,
+      'sourceList': sourceList.toString().split('.').last,
     };
   }
 
@@ -76,6 +87,7 @@ class GroceryItem {
     double? price,
     String? imageUrl,
     String? barcode,
+    ItemSourceList? sourceList,
   }) {
     return GroceryItem(
       id: id ?? this.id,
@@ -89,6 +101,7 @@ class GroceryItem {
       price: price ?? this.price,
       imageUrl: imageUrl ?? this.imageUrl,
       barcode: barcode ?? this.barcode,
+      sourceList: sourceList ?? this.sourceList,
     );
   }
 
